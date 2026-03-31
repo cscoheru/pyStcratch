@@ -26,5 +26,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# 默认命令 - 启动Flask服务
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--timeout", "600", "--access-logfile", "-", "--error-logfile", "-", "web_server:app"]
+# 默认命令 - 启动服务 (支持FastAPI或Flask)
+CMD ["sh", "-c", "if [ \"$USE_FASTAPI\" = \"true\" ]; then uvicorn api.app:app --host 0.0.0.0 --port 8000; else gunicorn --bind 0.0.0.0:8000 --workers 1 --timeout 600 --access-logfile - --error-logfile - web_server:app; fi"]

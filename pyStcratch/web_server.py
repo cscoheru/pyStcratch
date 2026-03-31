@@ -51,6 +51,156 @@ def get_stats():
         }), 500
 
 
+@app.route('/api/articles')
+def get_articles():
+    """
+    获取文章列表 (支持筛选、搜索、分页)
+
+    查询参数:
+    - source: 来源筛选 (zhihu, toutiao, wechat, etc.)
+    - category: 分类筛选 (psychology, management, etc.)
+    - search: 搜索关键词 (标题/内容/作者)
+    - min_quality: 最低质量分数 (0-1)
+    - is_valid: 只显示有效文章 (true/false)
+    - is_spam: 排除垃圾内容 (true/false)
+    - sort_by: 排序字段 (publish_time, quality_score, created_at)
+    - sort_order: 排序方向 (asc, desc)
+    - page: 页码 (默认1)
+    - page_size: 每页数量 (默认20)
+    """
+    try:
+        from sqlalchemy import and_, or_, desc, asc
+        from storage.models import Article
+
+        # 获取查询参数
+        source = request.args.get('source')
+        category = request.args.get('category')
+        subcategory = request.args.get('subcategory')
+        search = request.args.get('search')
+        min_quality = request.args.get('min_quality', type=float)
+        is_valid = request.args.get('is_valid')
+        is_spam = request.args.get('is_spam')
+        sort_by = request.args.get('sort_by', 'publish_time')
+        sort_order = request.args.get('sort_order', 'desc')
+        page = request.args.get('page', 1, type=int)
+        page_size = min(request.args.get('page_size', 20, type=int), 100)  # 最多100条
+
+        with db_manager.get_session() as session:
+            query = session.query(Article)
+
+            # 应用筛选条件
+            if is_valid is not None:
+                is_valid_bool = is_valid.lower() == 'true'
+                query = query.filter(Article.is_valid == is_valid_bool)
+            if is_spam is not None:
+                is_spam_bool = is_spam.lower() == 'true'
+                query = query.filter(Article.is_spam == is_spam_bool)
+            if source:
+                query = query.filter(Article.source == source)
+            if category:
+                query = query.filter(Article.category == category)
+            if subcategory:
+                query = query.filter(Article.subcategory == subcategory)
+            if min_quality is not None:
+                query = query.filter(Article.quality_score >= min_quality)
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.filter(
+                    or_(
+                        Article.title.like(search_pattern),
+                        Article.content.like(search_pattern),
+                        Article.author.like(search_pattern)
+                    )
+                )
+
+            # 获取总数
+            total = query.count()
+
+            # 应用排序
+            order_col = getattr(Article, sort_by, Article.publish_time)
+            if sort_order == 'desc':
+                query = query.order_by(desc(order_col))
+            else:
+                query = query.order_by(asc(order_col))
+
+            # 应用分页
+            offset = (page - 1) * page_size
+            articles = query.limit(page_size).offset(offset).all()
+
+            # 转换为字典
+            articles_data = [a.to_dict() for a in articles]
+
+            return jsonify({
+                "success": True,
+                "data": {
+                    "articles": articles_data,
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": (total + page_size - 1) // page_size
+                }
+            })
+    except Exception as e:
+        logger.error(f"Failed to get articles: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/articles/<int:article_id>')
+def get_article_detail(article_id):
+    """获取单篇文章详情"""
+    try:
+        from storage.models import Article
+
+        with db_manager.get_session() as session:
+            article = session.query(Article).filter(Article.id == article_id).first()
+            if article:
+                return jsonify({
+                    "success": True,
+                    "data": article.to_dict()
+                })
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "Article not found"
+                }), 404
+    except Exception as e:
+        logger.error(f"Failed to get article detail: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/categories')
+def get_categories():
+    """获取所有分类列表"""
+    try:
+        from storage.models import Article
+        from sqlalchemy import func
+
+        with db_manager.get_session() as session:
+            categories = session.query(Article.category).filter(
+                Article.category.isnot(None)
+            ).distinct().all()
+            category_list = [c[0] for c in categories if c[0]]
+
+            return jsonify({
+                "success": True,
+                "data": {
+                    "categories": category_list
+                }
+            })
+    except Exception as e:
+        logger.error(f"Failed to get categories: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @app.route('/api/crawl', methods=['POST'])
 def trigger_crawl():
     """
